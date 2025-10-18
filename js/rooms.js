@@ -1,19 +1,37 @@
 class RoomManager {
     constructor() {
         this.rooms = {
-            1: { name: "Комната 1", x: 400, y: 100, width: 200, height: 150, connections: { left: 4, right: 2 } },
-            2: { name: "Комната 2", x: 650, y: 200, width: 150, height: 200, connections: { left: 3 } },
-            3: { name: "Комната 3", x: 450, y: 350, width: 150, height: 150, connections: {} },
-            4: { name: "Комната 4", x: 150, y: 200, width: 150, height: 200, connections: { right: 5 } },
-            5: { name: "Комната 5", x: 50, y: 350, width: 150, height: 150, connections: {} }
+            1: { 
+                name: "Комната 1", 
+                x: 300, y: 100, 
+                width: 200, height: 150, 
+                connections: { right: 2, left: 4 } 
+            },
+            2: { 
+                name: "Комната 2", 
+                x: 550, y: 200, 
+                width: 150, height: 200, 
+                connections: { left: 3 } 
+            },
+            3: { 
+                name: "Комната 3", 
+                x: 350, y: 350, 
+                width: 150, height: 150, 
+                connections: {} 
+            },
+            4: { 
+                name: "Комната 4", 
+                x: 100, y: 200, 
+                width: 150, height: 200, 
+                connections: { right: 5 } 
+            },
+            5: { 
+                name: "Комната 5", 
+                x: 50, y: 350, 
+                width: 150, height: 150, 
+                connections: {} 
+            }
         };
-        
-        this.connections = [
-            { from: 1, to: 2, type: 'right' },
-            { from: 1, to: 4, type: 'left' },
-            { from: 2, to: 3, type: 'left' },
-            { from: 4, to: 5, type: 'right' }
-        ];
     }
 
     drawRooms(ctx) {
@@ -25,11 +43,11 @@ class RoomManager {
         
         // Рисуем комнаты
         for (const roomId in this.rooms) {
-            this.drawRoom(ctx, this.rooms[roomId]);
+            this.drawRoom(ctx, this.rooms[roomId], roomId);
         }
     }
 
-    drawRoom(ctx, room) {
+    drawRoom(ctx, room, roomId) {
         // Рисуем прямоугольник комнаты
         ctx.fillStyle = '#e8f4f8';
         ctx.strokeStyle = '#3498db';
@@ -39,34 +57,66 @@ class RoomManager {
         
         // Добавляем название комнаты
         ctx.fillStyle = '#2c3e50';
-        ctx.font = '16px Arial';
+        ctx.font = 'bold 16px Arial';
         ctx.textAlign = 'center';
         ctx.fillText(room.name, room.x + room.width/2, room.y + 25);
         
         // Добавляем номер комнаты
-        ctx.font = 'bold 20px Arial';
+        ctx.font = 'bold 24px Arial';
         ctx.fillText(roomId, room.x + room.width/2, room.y + room.height/2 + 8);
     }
 
     drawConnections(ctx) {
         ctx.strokeStyle = '#7f8c8d';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 3;
         
-        this.connections.forEach(conn => {
-            const fromRoom = this.rooms[conn.from];
-            const toRoom = this.rooms[conn.to];
+        // Рисуем все возможные соединения
+        for (const roomId in this.rooms) {
+            const room = this.rooms[roomId];
             
-            const start = this.getConnectionPoint(fromRoom, conn.type);
-            const end = this.getConnectionPoint(toRoom, this.getReverseDirection(conn.type));
-            
-            ctx.beginPath();
-            ctx.moveTo(start.x, start.y);
-            ctx.lineTo(end.x, end.y);
-            ctx.stroke();
-        });
+            for (const direction in room.connections) {
+                const targetRoomId = room.connections[direction];
+                const targetRoom = this.rooms[targetRoomId];
+                
+                const start = this.getConnectionPoint(room, direction);
+                const end = this.getConnectionPoint(targetRoom, this.getReverseDirection(direction));
+                
+                ctx.beginPath();
+                ctx.moveTo(start.x, start.y);
+                ctx.lineTo(end.x, end.y);
+                ctx.stroke();
+                
+                // Стрелка направления
+                this.drawArrow(ctx, start, end);
+            }
+        }
+    }
+
+    drawArrow(ctx, start, end) {
+        const angle = Math.atan2(end.y - start.y, end.x - start.x);
+        const length = Math.sqrt(Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2));
         
-        ctx.setLineDash([]);
+        if (length < 50) return; // Не рисуем стрелки для коротких соединений
+        
+        const arrowHeadLength = 15;
+        const arrowHeadAngle = Math.PI / 6;
+        
+        const midX = start.x + (end.x - start.x) * 0.5;
+        const midY = start.y + (end.y - start.y) * 0.5;
+        
+        ctx.fillStyle = '#e74c3c';
+        ctx.beginPath();
+        ctx.moveTo(midX, midY);
+        ctx.lineTo(
+            midX - arrowHeadLength * Math.cos(angle - arrowHeadAngle),
+            midY - arrowHeadLength * Math.sin(angle - arrowHeadAngle)
+        );
+        ctx.lineTo(
+            midX - arrowHeadLength * Math.cos(angle + arrowHeadAngle),
+            midY - arrowHeadLength * Math.sin(angle + arrowHeadAngle)
+        );
+        ctx.closePath();
+        ctx.fill();
     }
 
     getConnectionPoint(room, direction) {
@@ -85,12 +135,21 @@ class RoomManager {
     }
 
     getReverseDirection(direction) {
-        const opposites = { left: 'right', right: 'left', up: 'down', down: 'up' };
+        const opposites = { 
+            left: 'right', 
+            right: 'left', 
+            up: 'down', 
+            down: 'up' 
+        };
         return opposites[direction] || direction;
     }
 
     findPath(startRoomId, endRoomId) {
-        // Простой алгоритм поиска пути (BFS)
+        if (startRoomId === endRoomId) {
+            return [startRoomId];
+        }
+        
+        // Алгоритм BFS для поиска пути
         const queue = [[startRoomId]];
         const visited = new Set([startRoomId]);
         
@@ -103,11 +162,15 @@ class RoomManager {
             }
             
             const currentRoom = this.rooms[currentRoomId];
+            
+            // Проверяем все соединения из текущей комнаты
             for (const direction in currentRoom.connections) {
                 const nextRoomId = currentRoom.connections[direction];
+                
                 if (!visited.has(nextRoomId)) {
                     visited.add(nextRoomId);
-                    queue.push([...path, nextRoomId]);
+                    const newPath = [...path, nextRoomId];
+                    queue.push(newPath);
                 }
             }
         }

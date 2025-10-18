@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
@@ -16,9 +16,9 @@
             <div class="simulation-area">
                 <div class="controls-panel">
                     <div class="control-group">
-                        <h3>Управление перемещением</h3>
+                        <h3>Задание маршрута</h3>
                         <div class="path-controls">
-                            <label for="start-room">Из комнаты:</label>
+                            <label for="start-room">Стартовая комната:</label>
                             <select id="start-room">
                                 <option value="1">Комната 1</option>
                                 <option value="2">Комната 2</option>
@@ -27,7 +27,7 @@
                                 <option value="5">Комната 5</option>
                             </select>
                             
-                            <label for="end-room">В комнату:</label>
+                            <label for="end-room">Целевая комната:</label>
                             <select id="end-room">
                                 <option value="1">Комната 1</option>
                                 <option value="2">Комната 2</option>
@@ -36,7 +36,8 @@
                                 <option value="5">Комната 5</option>
                             </select>
                             
-                            <button id="move-btn">Переместить робота</button>
+                            <button id="start-btn">Запустить робота</button>
+                            <button id="reset-btn">Сбросить робота</button>
                         </div>
                     </div>
 
@@ -50,6 +51,9 @@
                             </select>
                             <button id="add-marker-btn">Добавить метку</button>
                             <button id="clear-markers-btn">Очистить все метки</button>
+                            <div id="placement-hint" style="display: none; color: #e74c3c; font-size: 12px; margin-top: 5px;">
+                                Кликните в текущей комнате робота для размещения метки
+                            </div>
                         </div>
                     </div>
 

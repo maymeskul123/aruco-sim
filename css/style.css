@@ -1,3 +1,5 @@
+# Добавляем новые стили к существующему CSS
+@"
 * {
     margin: 0;
     padding: 0;
@@ -98,6 +100,27 @@ button:hover {
     background: #c0392b;
 }
 
+#start-btn {
+    background: #27ae60;
+}
+
+#start-btn:hover {
+    background: #219a52;
+}
+
+#start-btn:disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
+}
+
+#reset-btn {
+    background: #e67e22;
+}
+
+#reset-btn:hover {
+    background: #d35400;
+}
+
 .status-panel {
     background: #e8f4fc;
     padding: 15px;
@@ -127,3 +150,15 @@ button:hover {
     border-radius: 8px;
     background: white;
 }
+
+#placement-hint {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    padding: 8px;
+    border-radius: 4px;
+    margin-top: 10px;
+    color: #856404;
+}
+"@ | Out-File -FilePath "css/style.css" -Encoding UTF8
+
+Write-Host "✅ style.css успешно обновлен!" -ForegroundColor Green
