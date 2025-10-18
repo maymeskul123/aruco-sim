@@ -2,10 +2,11 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>ArUco Navigation Prototype</title>
+<title>ArUco Navigation Canvas</title>
 <style>
   body { margin:0; font-family:sans-serif; background:#f9fafb; }
-  button { cursor:pointer; }
+  button { cursor:pointer; margin-right:4px; }
+  input { width:50px; margin-right:8px; }
 </style>
 </head>
 <body>
@@ -16,31 +17,31 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
 
-<!-- JSX код компонента -->
 <script type="text/babel">
-
 const { useState, useRef, useEffect } = React;
 
-// Вставляем здесь весь код ArucoNavPrototype
 function ArucoNavPrototype() {
-  const MAP_W = 900;
-  const MAP_H = 520;
+  const CANVAS_W = 900;
+  const CANVAS_H = 520;
+
+  const ROOM_COLOR = ["#ffffff","#e0f7fa","#fff3e0","#f3e5f5","#e8f5e9"];
+  const ROOM_BORDER = "#333";
 
   const ROOM_ANCHORS = {
-    1: { x: 120, y: 260 },
-    2: { x: 420, y: 260 },
-    3: { x: 520, y: 120 },
-    4: { x: 760, y: 120 },
-    5: { x: 760, y: 380 },
+    1: { x: 120, y: 260 }, // стартовая зона коридора
+    2: { x: 420, y: 260 }, // правая комната от коридора
+    3: { x: 360, y: 120 }, // комната в конце коридора налево от 2
+    4: { x: 520, y: 120 }, // комната налево от коридора после 1
+    5: { x: 760, y: 120 }, // комната справа от коридора после 4
   };
 
+  // минимальные метки: по одной на каждом проходе
   const defaultMarkers = [
-    { id: 1, x: 120, y: 100, room: 1 },
-    { id: 2, x: 260, y: 100, room: 1 },
-    { id: 3, x: 420, y: 260, room: 2 },
-    { id: 4, x: 520, y: 80, room: 3 },
-    { id: 5, x: 760, y: 80, room: 4 },
-    { id: 6, x: 760, y: 380, room: 5 },
+    { id:1, x:260, y:260, room:1 },
+    { id:2, x:420, y:260, room:2 },
+    { id:3, x:360, y:120, room:3 },
+    { id:4, x:520, y:120, room:4 },
+    { id:5, x:760, y:120, room:5 },
   ];
 
   const [markers, setMarkers] = useState(defaultMarkers);
@@ -49,272 +50,252 @@ function ArucoNavPrototype() {
   const [running, setRunning] = useState(false);
   const [startRoom, setStartRoom] = useState(1);
   const [targetRoom, setTargetRoom] = useState(5);
-  const canvasRef = useRef(null);
-  const [robot, setRobot] = useState({ x: ROOM_ANCHORS[1].x, y: ROOM_ANCHORS[1].y, theta: 0 });
+  const [robot, setRobot] = useState({ x: ROOM_ANCHORS[1].x, y: ROOM_ANCHORS[1].y, theta:0, room:1 });
   const [waypoints, setWaypoints] = useState([]);
-  const simRef = useRef({ interval: null });
+  const [detectedMarker, setDetectedMarker] = useState(null);
+
+  const canvasRef = useRef(null);
+  const simRef = useRef({ interval:null });
+  const dragRef = useRef({ idx:null, offsetX:0, offsetY:0 });
 
   const DETECTION_RANGE = 180;
   const FOV_DEG = 50;
 
   function addLog(text) {
     const t = `${new Date().toLocaleTimeString()}: ${text}`;
-    setLogs((s) => [t, ...s].slice(0, 400));
-    console.log(t);
-  }
-
-  function generateMarkers(n) {
-    const base = [];
-    const spread = n;
-    for (let i = 0; i < spread; i++) {
-      const id = i + 1;
-      let x, y;
-      const t = i / Math.max(1, spread - 1);
-      if (t < 0.33) {
-        const tt = t / 0.33;
-        x = 100 + (420 - 100) * tt;
-        y = 260;
-      } else if (t < 0.66) {
-        const tt = (t - 0.33) / 0.33;
-        x = 420;
-        y = 260 + (120 - 260) * tt;
-      } else {
-        const tt = (t - 0.66) / 0.34;
-        x = 420 + (760 - 420) * tt;
-        y = 120 + (380 - 120) * tt;
-      }
-      const room = chooseRoomForPosition(x, y);
-      base.push({ id, x: Math.round(x), y: Math.round(y), room });
-    }
-    setMarkers(base);
-    addLog(`Сгенерировано ${n} меток`);
-  }
-
-  function chooseRoomForPosition(x, y) {
-    let best = 1;
-    let bestD = 1e9;
-    Object.entries(ROOM_ANCHORS).forEach(([k, v]) => {
-      const dx = v.x - x;
-      const dy = v.y - y;
-      const d = Math.hypot(dx, dy);
-      if (d < bestD) {
-        bestD = d;
-        best = Number(k);
-      }
-    });
-    return best;
+    setLogs(s => [t,...s].slice(0,400));
   }
 
   function buildPath(fromRoom, toRoom) {
-    const order = [1, 2, 3, 4, 5];
+    // упрощаем: порядок 1->2->3->4->5
+    const order = [1,2,3,4,5];
     const fromIdx = order.indexOf(fromRoom);
     const toIdx = order.indexOf(toRoom);
-    if (fromIdx === -1 || toIdx === -1) return [];
-    const path = [];
-    const step = fromIdx < toIdx ? 1 : -1;
-    for (let i = fromIdx; i !== toIdx + step; i += step) {
+    if(fromIdx===-1 || toIdx===-1) return [];
+    const path=[];
+    const step = fromIdx<toIdx?1:-1;
+    for(let i=fromIdx;i!==toIdx+step;i+=step){
       const r = order[i];
-      path.push({ room: r, x: ROOM_ANCHORS[r].x, y: ROOM_ANCHORS[r].y });
+      path.push({ room:r, x:ROOM_ANCHORS[r].x, y:ROOM_ANCHORS[r].y });
     }
     return path;
   }
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    function draw() {
-      ctx.clearRect(0, 0, MAP_W, MAP_H);
-      ctx.fillStyle = "#f3f4f6";
-      ctx.fillRect(0, 0, MAP_W, MAP_H);
-
-      ctx.strokeStyle = "#cbd5e1";
-      ctx.lineWidth = 80;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(100, 260);
-      ctx.lineTo(420, 260);
-      ctx.lineTo(420, 120);
-      ctx.lineTo(760, 120);
-      ctx.lineTo(760, 380);
-      ctx.stroke();
-
-      Object.entries(ROOM_ANCHORS).forEach(([k, v]) => {
-        ctx.fillStyle = "white";
-        ctx.strokeStyle = "#111827";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.rect(v.x - 22, v.y - 22, 44, 44);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#111827";
-        ctx.font = "16px Inter, Arial";
-        ctx.fillText(k, v.x - 6, v.y + 6);
-      });
-
-      markers.forEach((m) => {
-        ctx.fillStyle = "#000";
-        ctx.fillRect(m.x - 14, m.y - 14, 28, 28);
-        ctx.fillStyle = "#fff";
-        ctx.font = "12px Inter, Arial";
-        ctx.fillText(String(m.id), m.x - 6, m.y + 5);
-        ctx.strokeStyle = "#fff";
-        ctx.strokeRect(m.x - 14, m.y - 14, 28, 28);
-      });
-
-      waypoints.forEach((w, idx) => {
-        ctx.beginPath();
-        ctx.fillStyle = idx === 0 ? "#10b981" : "#60a5fa";
-        ctx.arc(w.x, w.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      ctx.save();
-      ctx.translate(robot.x, robot.y);
-      ctx.rotate(robot.theta);
-      ctx.fillStyle = "#ef4444";
-      ctx.fillRect(-14, -10, 28, 20);
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      const len = 48;
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "#111827";
-      ctx.lineTo(len, 0);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.globalAlpha = 0.12;
-      ctx.fillStyle = "#111827";
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, DETECTION_RANGE, -FOV_DEG * (Math.PI / 180), FOV_DEG * (Math.PI / 180));
-      ctx.lineTo(0, 0);
-      ctx.fill();
-      ctx.globalAlpha = 1.0;
-      ctx.restore();
-
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
-      ctx.fillRect(8, MAP_H - 140, 260, 132);
-      ctx.fillStyle = "#fff";
-      ctx.font = "12px Inter, Arial";
-      const preview = logs.slice(0, 6);
-      preview.forEach((l, i) => {
-        ctx.fillText(l.replace(/^\d{1,2}:\d{2}:\d{2}: /, ""), 14, MAP_H - 118 + i * 18);
-      });
-    }
-
-    draw();
-  }, [markers, robot, waypoints, logs]);
-
-  useEffect(() => {
-    if (!running) {
-      if (simRef.current.interval) {
-        clearInterval(simRef.current.interval);
-        simRef.current.interval = null;
-      }
-      return;
-    }
-
-    if (simRef.current.interval) return;
-
-    simRef.current.interval = setInterval(() => {
-      setRobot((r) => {
-        if (waypoints.length === 0) return r;
-        const target = waypoints[0];
-        const dx = target.x - r.x;
-        const dy = target.y - r.y;
-        const dist = Math.hypot(dx, dy);
-        const speed = 2.7;
-        if (dist < 4) {
-          setWaypoints((w) => w.slice(1));
-          addLog(`Достигнут waypoint комнаты ${target.room}`);
-          if (waypoints.length === 1) {
-            addLog(`Цель достигнута (комната ${target.room}). Остановка.`);
-            setRunning(false);
-          }
-          return { ...r };
-        }
-        const theta = Math.atan2(dy, dx);
-        const nx = r.x + Math.cos(theta) * speed;
-        const ny = r.y + Math.sin(theta) * speed;
-        const newRobot = { x: nx, y: ny, theta };
-        detectMarkersAtPose(newRobot);
-        return newRobot;
-      });
-    }, 60);
-
-    return () => clearInterval(simRef.current.interval);
-  }, [running, waypoints]);
-
-  function detectMarkersAtPose(pose) {
-    markers.forEach((m) => {
-      const dx = m.x - pose.x;
-      const dy = m.y - pose.y;
-      const d = Math.hypot(dx, dy);
-      if (d > DETECTION_RANGE) return;
-      const ang = Math.atan2(dy, dx);
-      let da = ang - pose.theta;
-      while (da > Math.PI) da -= 2 * Math.PI;
-      while (da < -Math.PI) da += 2 * Math.PI;
-      const daDeg = (da * 180) / Math.PI;
-      if (Math.abs(daDeg) <= FOV_DEG) {
-        addLog(`Обнаружена метка ID=${m.id} (комната ${m.room}) dist=${d.toFixed(0)}px ang=${daDeg.toFixed(0)}°`);
-        if (waypoints.length > 0 && m.room === waypoints[0].room && d < 120) {
-          addLog(`По метке ID=${m.id} скорректирована позиция. Переход к следующему waypoint.`);
-          setWaypoints((w) => w.slice(1));
-        }
-      }
-    });
-  }
-
-  function startRun() {
-    const path = buildPath(Number(startRoom), Number(targetRoom));
-    if (path.length === 0) {
-      addLog("Неверные номера комнат");
-      return;
-    }
+  function startRun(){
+    const path = buildPath(startRoom, targetRoom);
+    if(path.length===0){ addLog("Неверные номера комнат"); return; }
     setWaypoints(path);
-    setRobot({ x: ROOM_ANCHORS[startRoom].x, y: ROOM_ANCHORS[startRoom].y, theta: 0 });
+    setRobot({ x: ROOM_ANCHORS[startRoom].x, y: ROOM_ANCHORS[startRoom].y, theta:0, room:startRoom });
     setRunning(true);
     addLog(`Старт из комнаты ${startRoom} → цель ${targetRoom}`);
+    setDetectedMarker(null);
   }
 
-  function stopRun() {
+  function stopRun(){
     setRunning(false);
     setWaypoints([]);
     addLog("Симуляция остановлена пользователем.");
   }
 
-  function updateMarker(index, next) {
-    setMarkers((m) => m.map((it, i) => (i === index ? { ...it, ...next } : it)));
+  // симуляция движения
+  useEffect(()=>{
+    if(!running){
+      if(simRef.current.interval){ clearInterval(simRef.current.interval); simRef.current.interval=null; }
+      return;
+    }
+    if(simRef.current.interval) return;
+    simRef.current.interval = setInterval(()=>{
+      setRobot(r=>{
+        if(waypoints.length===0) return r;
+        const target = waypoints[0];
+        const dx = target.x - r.x;
+        const dy = target.y - r.y;
+        const dist = Math.hypot(dx,dy);
+        const speed = 2.5;
+        if(dist<2){
+          setWaypoints(w=>w.slice(1));
+          addLog(`Достигнут waypoint комнаты ${target.room}`);
+          if(waypoints.length===1){
+            addLog(`Цель достигнута (комната ${target.room}). Остановка.`);
+            setRunning(false);
+          }
+          return {...r, room: target.room};
+        }
+        const theta = Math.atan2(dy,dx);
+        const nx = r.x + Math.cos(theta)*speed;
+        const ny = r.y + Math.sin(theta)*speed;
+        const newRobot = {...r, x:nx, y:ny, theta};
+        detectMarkersAtPose(newRobot);
+        return newRobot;
+      });
+    },30);
+    return ()=>clearInterval(simRef.current.interval);
+  },[running, waypoints]);
+
+  function detectMarkersAtPose(pose){
+    let lastDetected=null;
+    markers.forEach(m=>{
+      const dx = m.x - pose.x;
+      const dy = m.y - pose.y;
+      const d = Math.hypot(dx,dy);
+      if(d>DETECTION_RANGE) return;
+      const ang = Math.atan2(dy,dx);
+      let da = ang - pose.theta;
+      while(da>Math.PI) da-=2*Math.PI;
+      while(da<-Math.PI) da+=2*Math.PI;
+      const daDeg = (da*180)/Math.PI;
+      if(Math.abs(daDeg)<=FOV_DEG){
+        lastDetected = m;
+        addLog(`Обнаружена метка ID=${m.id} (комната ${m.room}) dist=${d.toFixed(0)}px ang=${daDeg.toFixed(0)}°`);
+        if(d<100) pose.room = m.room;
+      }
+    });
+    if(lastDetected) setDetectedMarker(lastDetected);
   }
+
+  // отрисовка
+  useEffect(()=>{
+    const canvas = canvasRef.current;
+    if(!canvas) return;
+    const ctx = canvas.getContext("2d");
+
+    function draw(){
+      ctx.clearRect(0,0,CANVAS_W,CANVAS_H);
+
+      // фон комнат
+      Object.entries(ROOM_ANCHORS).forEach(([k,v],idx)=>{
+        ctx.fillStyle=ROOM_COLOR[idx]||"#fff";
+        ctx.strokeStyle=ROOM_BORDER;
+        ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.rect(v.x-60,v.y-60,120,120);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle="#000";
+        ctx.font="16px sans-serif";
+        ctx.fillText("Комн "+k, v.x-30, v.y);
+      });
+
+      // проходы
+      ctx.strokeStyle="#888";
+      ctx.lineWidth=40;
+      ctx.lineCap="round";
+      ctx.beginPath();
+      ctx.moveTo(120,260); ctx.lineTo(420,260); // коридор
+      ctx.lineTo(360,120); // поворот в комнату 3
+      ctx.moveTo(420,260); ctx.lineTo(520,120); // поворот в комнату 4
+      ctx.moveTo(520,120); ctx.lineTo(760,120); // комната 5
+      ctx.stroke();
+
+      // метки
+      markers.forEach((m,idx)=>{
+        ctx.fillStyle="#000"; ctx.fillRect(m.x-14,m.y-14,28,28);
+        ctx.fillStyle="#fff"; ctx.font="12px sans-serif";
+        ctx.fillText(m.id,m.x-6,m.y+5);
+        ctx.strokeStyle="#fff"; ctx.strokeRect(m.x-14,m.y-14,28,28);
+      });
+
+      // робот
+      ctx.save();
+      ctx.translate(robot.x,robot.y);
+      ctx.rotate(robot.theta);
+      ctx.fillStyle="#ef4444";
+      ctx.fillRect(-14,-10,28,20);
+      ctx.beginPath();
+      ctx.moveTo(0,0);
+      ctx.lineTo(28,0);
+      ctx.strokeStyle="#111";
+      ctx.lineWidth=3;
+      ctx.stroke();
+      // FOV
+      ctx.beginPath();
+      ctx.globalAlpha=0.12;
+      ctx.fillStyle="#111";
+      ctx.moveTo(0,0);
+      ctx.arc(0,0,DETECTION_RANGE,-FOV_DEG*Math.PI/180,FOV_DEG*Math.PI/180);
+      ctx.lineTo(0,0);
+      ctx.fill();
+      ctx.globalAlpha=1.0;
+      ctx.restore();
+
+      // панель логов
+      ctx.fillStyle="rgba(0,0,0,0.6)";
+      ctx.fillRect(8,CANVAS_H-140,280,132);
+      ctx.fillStyle="#fff";
+      ctx.font="12px sans-serif";
+      const preview = logs.slice(0,6);
+      preview.forEach((l,i)=>ctx.fillText(l.replace(/^\d{1,2}:\d{2}:\d{2}: /,""),14,CANVAS_H-118+i*18));
+
+      // последняя метка
+      if(detectedMarker){
+        ctx.fillStyle="#10b981";
+        ctx.font="14px sans-serif";
+        ctx.fillText(`Последняя обнаруженная: ID=${detectedMarker.id}, комн=${detectedMarker.room}`, 300,CANVAS_H-110);
+      }
+
+      // текущая комната
+      ctx.fillStyle="#60a5fa";
+      ctx.fillText(`Текущая комната: ${robot.room}`, 300,CANVAS_H-90);
+    }
+
+    draw();
+  },[markers, robot, logs, detectedMarker]);
+
+  // drag & drop меток
+  useEffect(()=>{
+    const canvas = canvasRef.current;
+    if(!canvas) return;
+    const ctx = canvas.getContext("2d");
+
+    function getMousePos(evt){
+      const rect = canvas.getBoundingClientRect();
+      return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+    }
+
+    function onMouseDown(evt){
+      const pos = getMousePos(evt);
+      markers.forEach((m,idx)=>{
+        if(pos.x>=m.x-14 && pos.x<=m.x+14 && pos.y>=m.y-14 && pos.y<=m.y+14){
+          dragRef.current={ idx, offsetX: pos.x-m.x, offsetY: pos.y-m.y };
+        }
+      });
+    }
+    function onMouseMove(evt){
+      if(dragRef.current.idx!==null){
+        const pos = getMousePos(evt);
+        setMarkers(m=>m.map((it,i)=> i===dragRef.current.idx?{...it,x:pos.x-dragRef.current.offsetX,y:pos.y-dragRef.current.offsetY}:it));
+      }
+    }
+    function onMouseUp(){ dragRef.current={idx:null,offsetX:0,offsetY:0}; }
+
+    canvas.addEventListener("mousedown",onMouseDown);
+    canvas.addEventListener("mousemove",onMouseMove);
+    window.addEventListener("mouseup",onMouseUp);
+
+    return ()=>{
+      canvas.removeEventListener("mousedown",onMouseDown);
+      canvas.removeEventListener("mousemove",onMouseMove);
+      window.removeEventListener("mouseup",onMouseUp);
+    }
+  },[markers]);
 
   return (
     <div style={{ padding:16 }}>
-      <h1>Прототип навигации по ArUco (Web)</h1>
+      <h2>Прототип ArUco навигации (Canvas)</h2>
       <div style={{ display:'flex', gap:16 }}>
-        <canvas ref={canvasRef} width={MAP_W} height={MAP_H} style={{ border:'1px solid #333' }} />
-        <div style={{ flex:1 }}>
+        <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} style={{border:'1px solid #333'}} />
+        <div>
           <div style={{ marginBottom:8 }}>
-            <div>
-              <label>Количество меток: </label>
-              <input type="number" min={1} value={numMarkers} onChange={(e)=>setNumMarkers(Number(e.target.value))} />
-              <button onClick={()=>generateMarkers(numMarkers)}>Сгенерировать</button>
-            </div>
-            <div>
-              <label>Стартовая комната: </label>
-              <input type="number" min={1} max={5} value={startRoom} onChange={e=>setStartRoom(Number(e.target.value))} />
-            </div>
-            <div>
-              <label>Целевая комната: </label>
-              <input type="number" min={1} max={5} value={targetRoom} onChange={e=>setTargetRoom(Number(e.target.value))} />
-            </div>
-            <div>
+            <label>Стартовая комната: </label>
+            <input type="number" min={1} max={5} value={startRoom} onChange={e=>setStartRoom(Number(e.target.value))}/>
+            <label>Целевая комната: </label>
+            <input type="number" min={1} max={5} value={targetRoom} onChange={e=>setTargetRoom(Number(e.target.value))}/>
+            <div style={{ marginTop:8 }}>
               <button onClick={startRun}>Старт</button>
               <button onClick={stopRun}>Стоп</button>
             </div>
           </div>
           <div style={{ maxHeight:200, overflow:'auto', border:'1px solid #aaa', padding:4, background:'#000', color:'#fff' }}>
-            {logs.length===0 && <div>Логи пусты — нажмите Старт</div>}
             {logs.map((l,i)=><div key={i}>{l}</div>)}
           </div>
         </div>
@@ -323,10 +304,8 @@ function ArucoNavPrototype() {
   );
 }
 
-// Запуск компонента
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<ArucoNavPrototype />);
-
 </script>
 </body>
 </html>
